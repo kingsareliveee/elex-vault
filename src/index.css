@@ -1,0 +1,192 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 20% 97%;
+    --foreground: 216 50% 13%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 216 50% 13%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 216 50% 13%;
+
+    --primary: 216 75% 15%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 216 50% 13%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 199 89% 48%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 216 75% 15%;
+
+    --radius: 0.75rem;
+
+    /* Custom tokens */
+    --navy: 216 75% 15%;
+    --navy-light: 216 60% 25%;
+    --navy-dark: 216 80% 10%;
+    --sky: 199 89% 48%;
+    --sky-light: 199 89% 60%;
+    --surface: 220 20% 97%;
+    --surface-raised: 0 0% 100%;
+
+    --shadow-card: 0 1px 3px 0 hsl(216 75% 15% / 0.06), 0 1px 2px -1px hsl(216 75% 15% / 0.06);
+    --shadow-elevated: 0 10px 25px -5px hsl(216 75% 15% / 0.08), 0 8px 10px -6px hsl(216 75% 15% / 0.04);
+    --shadow-glow: 0 0 30px hsl(199 89% 48% / 0.15);
+
+    --font-display: 'Playfair Display', serif;
+    --font-body: 'Inter', sans-serif;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 216 80% 6%;
+    --foreground: 210 40% 95%;
+
+    --card: 216 65% 10%;
+    --card-foreground: 210 40% 95%;
+
+    --popover: 216 65% 10%;
+    --popover-foreground: 210 40% 95%;
+
+    --primary: 199 89% 48%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 216 50% 16%;
+    --secondary-foreground: 210 40% 95%;
+
+    --muted: 216 50% 16%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 199 89% 48%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 216 50% 18%;
+    --input: 216 50% 18%;
+    --ring: 199 89% 48%;
+
+    --navy: 216 75% 15%;
+    --navy-light: 216 60% 30%;
+    --navy-dark: 216 80% 6%;
+    --sky: 199 89% 55%;
+    --sky-light: 199 89% 65%;
+    --surface: 216 80% 6%;
+    --surface-raised: 216 65% 10%;
+
+    --shadow-card: 0 1px 3px 0 hsl(0 0% 0% / 0.2);
+    --shadow-elevated: 0 10px 25px -5px hsl(0 0% 0% / 0.3);
+    --shadow-glow: 0 0 30px hsl(199 89% 48% / 0.2);
+
+    --sidebar-background: 216 80% 6%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 199 89% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 216 50% 16%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 216 50% 18%;
+    --sidebar-ring: 199 89% 48%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+  }
+  h1, h2, h3 {
+    font-family: var(--font-display);
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+  }
+  .font-body {
+    font-family: var(--font-body);
+  }
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+  .shadow-elevated {
+    box-shadow: var(--shadow-elevated);
+  }
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+  .bg-navy {
+    background-color: hsl(var(--navy));
+  }
+  .bg-navy-light {
+    background-color: hsl(var(--navy-light));
+  }
+  .bg-navy-dark {
+    background-color: hsl(var(--navy-dark));
+  }
+  .text-navy {
+    color: hsl(var(--navy));
+  }
+  .bg-sky-accent {
+    background-color: hsl(var(--sky));
+  }
+  .text-sky-accent {
+    color: hsl(var(--sky));
+  }
+  .bg-surface {
+    background-color: hsl(var(--surface));
+  }
+  .bg-surface-raised {
+    background-color: hsl(var(--surface-raised));
+  }
+  .gradient-navy {
+    background: linear-gradient(135deg, hsl(var(--navy-dark)), hsl(var(--navy)), hsl(var(--navy-light)));
+  }
+  .gradient-accent {
+    background: linear-gradient(135deg, hsl(var(--sky)), hsl(var(--sky-light)));
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--surface));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--navy-light));
+  border-radius: 3px;
+}
+
+/* Search dropdown */
+.search-dropdown {
+  max-height: 300px;
+  overflow-y: auto;
+}
