@@ -10,6 +10,7 @@ import SemesterPage from "./pages/SemesterPage.tsx";
 import SubjectPage from "./pages/SubjectPage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import ElexVaultPage from "./pages/ElexVaultPage.tsx";
+import FloatingUploadButton from "@/components/FloatingUploadButton";
 
 const queryClient = new QueryClient();
 
@@ -25,9 +26,10 @@ const App = () => (
           <Route path="/course/:courseId" element={<CoursePage />} />
           <Route path="/course/:courseId/semester/:semId" element={<SemesterPage />} />
           <Route path="/subject/:subjectId" element={<SubjectPage />} />
-                    <Route path="/vault" element={<ElexVaultPage />} />
+          <Route path="/vault" element={<ElexVaultPage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
+        <FloatingUploadButton />
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

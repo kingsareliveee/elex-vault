@@ -22,6 +22,7 @@ interface UploadFormData {
   subject_code: string;
   exam_year: number;
   contributor_name: string;
+  resource_type: string;
 }
 
 export const VaultUploadSection = () => {
@@ -31,7 +32,17 @@ export const VaultUploadSection = () => {
     subject_code: '',
     exam_year: new Date().getFullYear(),
     contributor_name: '',
+    resource_type: '',
   });
+  // Resource type options
+  const resourceTypeOptions = [
+    { value: 'mst_1', label: 'MST 1' },
+    { value: 'mst_2', label: 'MST 2' },
+    { value: 'mst_3', label: 'MST 3' },
+    { value: 'endsem', label: 'EndSem' },
+    { value: 'syllabus', label: 'Syllabus' },
+    { value: 'assignment', label: 'Assignment' },
+  ];
 
   const [file, setFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -120,8 +131,8 @@ export const VaultUploadSection = () => {
       return;
     }
 
-    if (!formData.course || !formData.semester || !formData.subject_code || !formData.contributor_name) {
-      toast.error('Please select course, semester, subject, and enter contributor name');
+    if (!formData.course || !formData.semester || !formData.subject_code || !formData.contributor_name || !formData.resource_type) {
+      toast.error('Please select course, semester, subject, resource type, and enter contributor name');
       return;
     }
     setIsLoading(true);
@@ -163,6 +174,7 @@ export const VaultUploadSection = () => {
         contributor_name: formData.contributor_name,
         file_url: publicUrl,
         is_approved: false,
+        resource_type: formData.resource_type,
       };
 
       console.log('UPLOAD PAYLOAD', payload);
@@ -185,6 +197,7 @@ export const VaultUploadSection = () => {
         subject_code: '',
         exam_year: new Date().getFullYear(),
         contributor_name: '',
+        resource_type: '',
       });
       setFile(null);
 
@@ -227,6 +240,28 @@ export const VaultUploadSection = () => {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Resource Type Dropdown */}
+              <div>
+                <Label htmlFor="resource_type" className="text-zinc-200 font-medium">
+                  Resource Type
+                </Label>
+                <Select
+                  value={formData.resource_type}
+                  onValueChange={(value) => handleInputChange('resource_type', value)}
+                  disabled={isLoading}
+                >
+                  <SelectTrigger className="mt-2 bg-slate-800/50 border-slate-600 text-zinc-100 focus:border-blue-500 focus:ring-blue-500/20">
+                    <SelectValue placeholder="Select resource type" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-600">
+                    {resourceTypeOptions.map((r) => (
+                      <SelectItem key={r.value} value={r.value} className="text-zinc-100">
+                        {r.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               {/* Course Selection */}
               <div>
                 <Label htmlFor="course" className="text-zinc-200 font-medium">

@@ -13,7 +13,15 @@ const SubjectPage = () => {
   const navigate = useNavigate();
 
   const subject = subjectId ? findSubjectByCode(subjectId) : null;
-  const [dbPapers, setDbPapers] = useState<any[]>([]);
+  // Remove dbPapers, use only categorized
+  const [categorized, setCategorized] = useState({
+    mst_1: [],
+    mst_2: [],
+    mst_3: [],
+    endsem: [],
+    syllabus: [],
+    assignment: [],
+  });
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -29,7 +37,12 @@ const SubjectPage = () => {
           .order('exam_year', { ascending: false });
 
         if (error) throw error;
-        setDbPapers(data || []);
+        // Categorize by resource_type
+        const cat = { mst_1: [], mst_2: [], mst_3: [], endsem: [], syllabus: [], assignment: [] };
+        (data || []).forEach((row) => {
+          if (cat[row.resource_type]) cat[row.resource_type].push(row);
+        });
+        setCategorized(cat);
       } catch (err) {
         console.error('Error fetching papers:', err);
       } finally {
@@ -55,13 +68,18 @@ const SubjectPage = () => {
     .map((c) => (c === "bsc" ? "BSc Electronics" : "Integrated MTech Electronics"))
     .join(" & ");
 
-  const subjectPapers = dbPapers.map((p) => ({
-    id: String(p.id),
-    subjectId: p.subject_code || subjectId,
-    type: "Exam Paper",
-    year: p.exam_year,
-    downloadUrl: p.file_url,
-  }));
+  // Remove subjectPapers, use categorized and mapPapers instead
+  // Helper to map paper rows to PaperList format
+
+  const mapPapers = (arr, label) =>
+    arr.map((p) => ({
+      id: String(p.id),
+      subjectId: p.subject_code || subjectId,
+      type: label,
+      year: p.exam_year,
+      downloadUrl: p.file_url,
+      contributor: p.contributor_name,
+    }));
 
   return (
     <div className="min-h-screen bg-background">
