@@ -1,20 +1,62 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, FileText, BookOpen, Loader2 } from "lucide-react";
+import { ArrowLeft, FileText, BookOpen, Loader2, AlertCircle } from "lucide-react";
 import { findSubjectByCode } from "@/data/academicStructure";
 import { supabase } from "@/lib/supabaseClient";
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from "react";
 import PaperList from '@/components/PaperList';
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 
-const SubjectPage = () => {
-  const { subjectId } = useParams<{ subjectId: string }>();
+// Basic Error Boundary for SubjectPage to prevent black screens
+class SubjectPageErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: Error | null}> {
+  constructor(props: {children: ReactNode}) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("SubjectPage Error Boundary caught an error:", error, errorInfo);
+  }
+  
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 text-center">
+          <AlertCircle className="w-12 h-12 text-destructive mb-4" />
+          <h2 className="text-2xl font-bold mb-2">Something went wrong</h2>
+          <p className="text-muted-foreground mb-4">
+            {this.state.error?.message || "An unexpected error occurred rendering this subject."}
+          </p>
+          <button 
+            onClick={() => window.location.href = '/'} 
+            className="px-6 py-2 bg-primary text-primary-foreground rounded-md font-medium"
+          >
+            Go Home
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const SubjectPageContent = () => {
+  const params = useParams<{ subjectId: string }>();
+  const { subjectId } = params;
   const navigate = useNavigate();
 
+  // DEBUG LOG 1: Route Params
+  console.log("Route params:", params);
+
+  // Safe lookup with fallback
   const subject = subjectId ? findSubjectByCode(subjectId) : null;
-  // Remove dbPapers, use only categorized
-  const [categorized, setCategorized] = useState({
+  
+  const [categorized, setCategorized] = useState<any>({
     mst_1: [],
     mst_2: [],
     mst_3: [],
@@ -22,64 +64,107 @@ const SubjectPage = () => {
     syllabus: [],
     assignment: [],
   });
+  
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchPapers() {
-      if (!subjectId) return;
+      if (!subjectId) {
+        setIsLoading(false);
+        return;
+      }
+      
       setIsLoading(true);
+      setError(null);
+      
       try {
-        const { data, error } = await supabase
+        const { data, error: fetchError } = await supabase
           .from('elex_papers')
           .select('*')
           .eq('is_approved', true)
           .eq('subject_code', subjectId)
           .order('exam_year', { ascending: false });
 
-        if (error) throw error;
-        // Categorize by resource_type
-        const cat = { mst_1: [], mst_2: [], mst_3: [], endsem: [], syllabus: [], assignment: [] };
-        (data || []).forEach((row) => {
-          if (cat[row.resource_type]) cat[row.resource_type].push(row);
-        });
+        if (fetchError) throw fetchError;
+        
+        const cat: any = { mst_1: [], mst_2: [], mst_3: [], endsem: [], syllabus: [], assignment: [] };
+        
+        // Defensive mapping to ensure data is an array
+        if (Array.isArray(data)) {
+          data.forEach((row) => {
+            if (row && row.resource_type && cat[row.resource_type]) {
+               cat[row.resource_type].push(row);
+            }
+          });
+        }
+        
         setCategorized(cat);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error fetching papers:', err);
+        setError(err.message || "Failed to load papers from database");
       } finally {
         setIsLoading(false);
       }
     }
+    
     fetchPapers();
   }, [subjectId]);
+
+  // DEBUG LOG 2 & 3: Papers and Loading State
+  console.log("Fetched papers (categorized):", categorized);
+  console.log("Loading state:", isLoading);
+
+  if (!subjectId) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <div className="pt-24 px-4 text-center">
+          <p className="text-muted-foreground">No subject ID provided in URL.</p>
+          <button onClick={() => navigate(-1)} className="text-accent mt-4 underline">Go Back</button>
+        </div>
+      </div>
+    );
+  }
 
   if (!subject) {
     return (
       <div className="min-h-screen bg-background">
         <Navbar />
         <div className="pt-24 px-4 text-center">
-          <p className="text-muted-foreground">Subject not found.</p>
+          <p className="text-muted-foreground">Subject {subjectId} not found in academic structure.</p>
           <button onClick={() => navigate("/")} className="text-accent mt-4 underline">Go Home</button>
         </div>
       </div>
     );
   }
 
-  const courseTitle = subject.courses
-    .map((c) => (c === "bsc" ? "BSc Electronics" : "Integrated MTech Electronics"))
-    .join(" & ");
+  // Safe mapping of courses
+  const courseTitle = Array.isArray(subject?.courses)
+    ? subject.courses.map((c) => (c === "bsc" ? "BSc Electronics" : "Integrated MTech Electronics")).join(" & ")
+    : "Unknown Course";
 
-  // Remove subjectPapers, use categorized and mapPapers instead
-  // Helper to map paper rows to PaperList format
-
-  const mapPapers = (arr, label) =>
-    arr.map((p) => ({
-      id: String(p.id),
-      subjectId: p.subject_code || subjectId,
+  // Safe mapping helper for PaperList
+  const mapPapers = (arr: any[], label: string) => {
+    if (!Array.isArray(arr)) return [];
+    return arr.map((p) => ({
+      id: String(p?.id || Math.random()),
+      subjectId: p?.subject_code || subjectId,
       type: label,
-      year: p.exam_year,
-      downloadUrl: p.file_url,
-      contributor: p.contributor_name,
+      year: p?.exam_year || "Unknown Year",
+      downloadUrl: p?.file_url || "#",
+      contributor: p?.contributor_name || "Anonymous",
     }));
+  };
+
+  // Re-create subjectPapers array safely for the component
+  const subjectPapers = [
+    ...mapPapers(categorized?.mst_1, "MST 1"),
+    ...mapPapers(categorized?.mst_2, "MST 2"),
+    ...mapPapers(categorized?.mst_3, "MST 3"),
+    ...mapPapers(categorized?.endsem, "Endsem"),
+    ...mapPapers(categorized?.assignment, "Assignment"),
+  ];
 
   return (
     <div className="min-h-screen bg-background">
@@ -105,13 +190,13 @@ const SubjectPage = () => {
                   {courseTitle}
                 </span>
                 <span className="text-xs font-medium text-primary-foreground/60 bg-primary-foreground/10 px-3 py-1 rounded-full">
-                  Semester {subject.semester}
+                  Semester {subject.semester || "?"}
                 </span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-display font-bold text-primary-foreground">
-                {subject.name}
+                {subject.name || "Unknown Subject"}
               </h1>
-              <p className="text-sm text-primary-foreground/80 mt-2">{subject.code}</p>
+              <p className="text-sm text-primary-foreground/80 mt-2">{subject.code || subjectId}</p>
             </div>
           </motion.div>
 
@@ -148,6 +233,14 @@ const SubjectPage = () => {
                 <Loader2 className="w-6 h-6 animate-spin text-accent" />
                 <span className="text-sm text-muted-foreground ml-2">Loading papers...</span>
               </div>
+            ) : error ? (
+              <div className="p-4 bg-destructive/10 text-destructive border border-destructive/20 rounded-lg flex items-start gap-3">
+                 <AlertCircle className="w-5 h-5 mt-0.5" />
+                 <div>
+                   <p className="font-medium">Error loading papers</p>
+                   <p className="text-sm opacity-90">{error}</p>
+                 </div>
+              </div>
             ) : subjectPapers.length === 0 ? (
               <p className="text-sm text-muted-foreground">No papers uploaded yet for this subject.</p>
             ) : (
@@ -161,4 +254,10 @@ const SubjectPage = () => {
   );
 };
 
-export default SubjectPage;
+export default function SubjectPage() {
+  return (
+    <SubjectPageErrorBoundary>
+      <SubjectPageContent />
+    </SubjectPageErrorBoundary>
+  );
+}
