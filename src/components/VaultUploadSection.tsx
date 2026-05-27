@@ -13,8 +13,110 @@ import { toast } from 'sonner';
 import { Loader2, Upload, CheckCircle } from 'lucide-react';
 import { academicStructure, CourseKey, SemesterKey } from '@/data/academicStructure';
 import { supabase } from '@/lib/supabaseClient';
+import { jsPDF } from 'jspdf';
+import imageCompression from 'browser-image-compression';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+
+const readFileAsDataURL = (file: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+};
+
+const getImageDimensions = (dataUrl: string): Promise<{ width: number; height: number }> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => reject(new Error('Failed to load image to calculate dimensions'));
+    img.src = dataUrl;
+  });
+};
+
+const compressImage = async (imageFile: File): Promise<File> => {
+  const options = {
+    maxSizeMB: 1,
+    maxWidthOrHeight: 1920,
+    useWebWorker: true,
+  };
+  try {
+    return await imageCompression(imageFile, options);
+  } catch (error) {
+    console.error('Image compression failed:', error);
+    throw new Error('Failed to compress image safely. The image file might be corrupted.');
+  }
+};
+
+const convertImageToPdf = (imageFile: File): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imgDataUrl = e.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const pdf = new jsPDF({
+            orientation: 'p',
+            unit: 'mm',
+            format: 'a4',
+          });
+
+          // A4 dimensions in mm: 210 x 297
+          const a4Width = 210;
+          const a4Height = 297;
+
+          // Get image dimensions
+          const imgWidth = img.naturalWidth || img.width;
+          const imgHeight = img.naturalHeight || img.height;
+
+          // Calculate dimensions maintaining aspect ratio
+          const aspectRatio = imgWidth / imgHeight;
+          const a4AspectRatio = a4Width / a4Height;
+
+          let width = a4Width;
+          let height = a4Height;
+          let x = 0;
+          let y = 0;
+
+          if (aspectRatio > a4AspectRatio) {
+            // Image is wider than A4 ratio
+            width = a4Width;
+            height = a4Width / aspectRatio;
+            y = (a4Height - height) / 2; // Center vertically
+          } else {
+            // Image is taller than A4 ratio
+            height = a4Height;
+            width = a4Height * aspectRatio;
+            x = (a4Width - width) / 2; // Center horizontally
+          }
+
+          // Determine format from mime type
+          let format = 'JPEG';
+          if (imageFile.type === 'image/png') {
+            format = 'PNG';
+          }
+
+          pdf.addImage(imgDataUrl, format, x, y, width, height, undefined, 'FAST');
+          const pdfBlob = pdf.output('blob');
+          resolve(pdfBlob);
+        } catch (err) {
+          reject(new Error('PDF generation failed: ' + (err instanceof Error ? err.message : String(err))));
+        }
+      };
+      img.onerror = () => {
+        reject(new Error('Failed to load image. The file might be corrupted or in an unsupported format.'));
+      };
+      img.src = imgDataUrl;
+    };
+    reader.onerror = () => {
+      reject(new Error('Failed to read image file.'));
+    };
+    reader.readAsDataURL(imageFile);
+  });
+};
 
 interface UploadFormData {
   course: string;
@@ -47,6 +149,7 @@ export const VaultUploadSection = () => {
   const [file, setFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [processingStep, setProcessingStep] = useState<string>('');
 
   const coursesOptions = [
     { value: 'bsc', label: 'BSc Electronics' },
@@ -101,12 +204,13 @@ export const VaultUploadSection = () => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      if (selectedFile.type !== 'application/pdf') {
-        toast.error('Only PDF files are allowed.');
+      const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+      if (!allowedTypes.includes(selectedFile.type)) {
+        toast.error('Only PDF, JPG, JPEG, and PNG files are allowed.');
         return;
       }
       if (selectedFile.size > MAX_FILE_SIZE) {
-        toast.error('PDF size must be less than 5 MB.');
+        toast.error('File size must be less than 5 MB.');
         return;
       }
       setFile(selectedFile);
@@ -117,17 +221,18 @@ export const VaultUploadSection = () => {
     e.preventDefault();
 
     if (!file) {
-      toast.error('Please select a PDF file');
+      toast.error('Please select a PDF or image file');
       return;
     }
 
-    if (file.type !== 'application/pdf') {
-      toast.error('Only PDF files are allowed.');
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Only PDF, JPG, JPEG, and PNG files are allowed.');
       return;
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      toast.error('PDF size must be less than 5 MB.');
+      toast.error('File size must be less than 5 MB.');
       return;
     }
 
@@ -135,32 +240,81 @@ export const VaultUploadSection = () => {
       toast.error('Please select course, semester, subject, resource type, and enter contributor name');
       return;
     }
+
+    // --- FEATURE 1: NAME QUALITY FILTER ---
+    const rawName = formData.contributor_name.trim();
+    if (rawName.length < 3 || rawName.length > 40) {
+      toast.error('Contributor name must be between 3 and 40 characters.');
+      return;
+    }
+
+    const spamRegex = /^(abc|xyz|qwerty|123|anonymous|test|null|admin|asd)$/i;
+    // Basic protection against entirely numeric or special-char-only names
+    if (spamRegex.test(rawName) || /^[^a-zA-Z]+$/.test(rawName)) {
+      toast.error('Please enter a valid contributor name.');
+      return;
+    }
+
     setIsLoading(true);
+    setProcessingStep('Checking for duplicates...');
 
     try {
-      const fileExt = file.name.split('.').pop();
       const subjectCode = formData.subject_code;
+
+      // --- FEATURE 2: DUPLICATE PREVENTION ---
+      const { data: existingPapers, error: checkError } = await supabase
+        .from('elex_papers')
+        .select('id')
+        .eq('subject_code', subjectCode)
+        .eq('resource_type', formData.resource_type)
+        .eq('exam_year', formData.exam_year)
+        .eq('is_approved', true)
+        .limit(1);
+
+      if (checkError) throw checkError;
+
+      if (existingPapers && existingPapers.length > 0) {
+        toast.error('This paper already exists in the vault.');
+        setIsLoading(false);
+        setProcessingStep('');
+        return; // BLOCK upload
+      }
+
+      // Process file based on type
+      let fileToUpload = file;
+      if (file.type !== 'application/pdf') {
+        setProcessingStep('Compressing image...');
+        const compressed = await compressImage(file);
+
+        setProcessingStep('Converting to PDF...');
+        const pdfBlob = await convertImageToPdf(compressed);
+
+        const baseName = file.name.split('.').slice(0, -1).join('.') || 'document';
+        fileToUpload = new File([pdfBlob], `${baseName}.pdf`, { type: 'application/pdf' });
+      }
+
+      setProcessingStep('Uploading PDF to vault...');
       const matchedSubject = subjectOptions.find((s) => s.value === subjectCode);
       const subjectName = matchedSubject ? matchedSubject.nameOnly : '';
+      const fileExt = fileToUpload.type === 'application/pdf' ? 'pdf' : fileToUpload.name.split('.').pop() || 'pdf';
       const fileName = `${subjectCode}_${formData.semester}_${Date.now()}.${fileExt}`;
 
       // Upload to Supabase storage bucket 'papers_pdf'
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('papers_pdf')
-        .upload(fileName, file, { cacheControl: '3600', upsert: false });
+        .upload(fileName, fileToUpload, { cacheControl: '3600', upsert: false });
 
       console.log('UPLOAD STORAGE RESPONSE', { uploadData, uploadError });
       if (uploadError) throw uploadError;
 
       // Get public URL
-      const { data: publicUrlData, error: publicUrlError } = await supabase.storage
+      const { data: publicUrlData } = supabase.storage
         .from('papers_pdf')
         .getPublicUrl(fileName);
 
-      console.log('GET PUBLIC URL RESPONSE', { publicUrlData, publicUrlError });
-      if (publicUrlError) throw publicUrlError;
+      console.log('GET PUBLIC URL RESPONSE', { publicUrlData });
 
-      const publicUrl = (publicUrlData as any)?.publicUrl ?? '';
+      const publicUrl = publicUrlData?.publicUrl ?? '';
       if (!publicUrl) {
         throw new Error('Public URL was not returned from Supabase storage');
       }
@@ -179,6 +333,7 @@ export const VaultUploadSection = () => {
 
       console.log('UPLOAD PAYLOAD', payload);
 
+      setProcessingStep('Saving metadata...');
       // Insert metadata row into elex_papers, mark as not approved
       const { data: insertData, error: insertError } = await supabase
         .from('elex_papers')
@@ -207,6 +362,7 @@ export const VaultUploadSection = () => {
       toast.error(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setIsLoading(false);
+      setProcessingStep('');
     }
   };
 
@@ -374,16 +530,16 @@ export const VaultUploadSection = () => {
                 />
               </div>
 
-              {/* PDF Upload */}
+              {/* PDF or Image Upload */}
               <div>
                 <Label htmlFor="pdf" className="text-zinc-200 font-medium">
-                  Upload PDF
+                  Upload PDF or Image
                 </Label>
                 <div className="mt-2 relative">
                   <input
                     id="pdf"
                     type="file"
-                    accept=".pdf"
+                    accept=".pdf,image/jpeg,image/jpg,image/png"
                     onChange={handleFileChange}
                     className="hidden"
                     disabled={isLoading}
@@ -393,10 +549,13 @@ export const VaultUploadSection = () => {
                     className="flex flex-col items-center justify-center w-full p-6 border-2 border-dashed border-slate-600 rounded-xl bg-slate-800/30 cursor-pointer hover:bg-slate-800/50 transition-colors"
                   >
                     <Upload className="w-8 h-8 text-blue-400 mb-2" />
-                    <span className="text-zinc-300 font-medium">
-                      {file ? file.name : 'Click to upload PDF'}
+                    <span className="text-zinc-300 font-medium text-center">
+                      {file ? file.name : 'Click to upload PDF or Image'}
                     </span>
-                    <span className="text-zinc-500 text-sm mt-1">
+                    <span className="text-zinc-500 text-xs mt-1 text-center font-normal">
+                      Images are automatically converted into PDF format before moderation.
+                    </span>
+                    <span className="text-zinc-500 text-xs mt-1">
                       Max 5MB
                     </span>
                   </label>
@@ -412,7 +571,7 @@ export const VaultUploadSection = () => {
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Uploading...
+                    {processingStep || 'Uploading...'}
                   </>
                 ) : (
                   <>

@@ -45,6 +45,21 @@ class SubjectPageErrorBoundary extends Component<{children: ReactNode}, {hasErro
   }
 }
 
+interface DBResource {
+  id: number | string;
+  subject_name: string;
+  subject_code: string;
+  semester: string;
+  course: string;
+  exam_year: number;
+  contributor_name: string;
+  file_url: string;
+  is_approved: boolean;
+  resource_type: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 const SubjectPageContent = () => {
   const params = useParams<{ subjectId: string }>();
   const { subjectId } = params;
@@ -56,7 +71,7 @@ const SubjectPageContent = () => {
   // Safe lookup with fallback
   const subject = subjectId ? findSubjectByCode(subjectId) : null;
   
-  const [categorized, setCategorized] = useState<any>({
+  const [categorized, setCategorized] = useState<Record<string, DBResource[]>>({
     mst_1: [],
     mst_2: [],
     mst_3: [],
@@ -88,21 +103,21 @@ const SubjectPageContent = () => {
 
         if (fetchError) throw fetchError;
         
-        const cat: any = { mst_1: [], mst_2: [], mst_3: [], endsem: [], syllabus: [], assignment: [] };
+        const cat: Record<string, DBResource[]> = { mst_1: [], mst_2: [], mst_3: [], endsem: [], syllabus: [], assignment: [] };
         
         // Defensive mapping to ensure data is an array
         if (Array.isArray(data)) {
           data.forEach((row) => {
             if (row && row.resource_type && cat[row.resource_type]) {
-               cat[row.resource_type].push(row);
+               cat[row.resource_type].push(row as DBResource);
             }
           });
         }
         
         setCategorized(cat);
-      } catch (err: any) {
+      } catch (err) {
         console.error('Error fetching papers:', err);
-        setError(err.message || "Failed to load papers from database");
+        setError(err instanceof Error ? err.message : "Failed to load papers from database");
       } finally {
         setIsLoading(false);
       }
@@ -145,13 +160,13 @@ const SubjectPageContent = () => {
     : "Unknown Course";
 
   // Safe mapping helper for PaperList
-  const mapPapers = (arr: any[], label: string) => {
+  const mapPapers = (arr: DBResource[], label: string) => {
     if (!Array.isArray(arr)) return [];
     return arr.map((p) => ({
       id: String(p?.id || Math.random()),
       subjectId: p?.subject_code || subjectId,
       type: label,
-      year: p?.exam_year || "Unknown Year",
+      year: Number(p?.exam_year) || new Date().getFullYear(),
       downloadUrl: p?.file_url || "#",
       contributor: p?.contributor_name || "Anonymous",
     }));

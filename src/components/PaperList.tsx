@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Download } from 'lucide-react';
+import { Download, User } from 'lucide-react';
 import type { Paper } from '@/data/subjects';
 
 type Props = {
@@ -21,10 +21,14 @@ export default function PaperList({ papers }: Props) {
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.1 + idx * 0.04 }}
           >
-            <div>
+            <div className="flex flex-col gap-1">
               <span className="font-medium text-sm text-foreground">
                 {paper.type} {paper.year}
               </span>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <User className="w-3 h-3" />
+                <span>Uploaded by {paper.contributor || 'Anonymous'}</span>
+              </div>
             </div>
             <a
               href={paper.downloadUrl}
