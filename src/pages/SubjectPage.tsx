@@ -54,6 +54,7 @@ interface DBResource {
   exam_year: number;
   contributor_name: string;
   file_url: string;
+  storage_path?: string;
   is_approved: boolean;
   resource_type: string;
   created_at?: string;
@@ -71,59 +72,81 @@ const SubjectPageContent = () => {
   // Safe lookup with fallback
   const subject = subjectId ? findSubjectByCode(subjectId) : null;
   
-  const [categorized, setCategorized] = useState<Record<string, DBResource[]>>({
-    mst_1: [],
-    mst_2: [],
-    mst_3: [],
-    endsem: [],
-    syllabus: [],
-    assignment: [],
-  });
-  
+  const PAGE_SIZE = 15;
+  const [papersList, setPapersList] = useState<DBResource[]>([]);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function fetchPapers() {
-      if (!subjectId) {
-        setIsLoading(false);
-        return;
+  const categorized = React.useMemo(() => {
+    const cat: Record<string, DBResource[]> = {
+      mst_1: [],
+      mst_2: [],
+      mst_3: [],
+      endsem: [],
+      syllabus: [],
+      assignment: [],
+    };
+    papersList.forEach((row) => {
+      if (row && row.resource_type && cat[row.resource_type]) {
+        cat[row.resource_type].push(row);
       }
-      
-      setIsLoading(true);
-      setError(null);
-      
-      try {
-        const { data, error: fetchError } = await supabase
-          .from('elex_papers')
-          .select('*')
-          .eq('is_approved', true)
-          .eq('subject_code', subjectId)
-          .order('exam_year', { ascending: false });
+    });
+    return cat;
+  }, [papersList]);
 
-        if (fetchError) throw fetchError;
-        
-        const cat: Record<string, DBResource[]> = { mst_1: [], mst_2: [], mst_3: [], endsem: [], syllabus: [], assignment: [] };
-        
-        // Defensive mapping to ensure data is an array
-        if (Array.isArray(data)) {
-          data.forEach((row) => {
-            if (row && row.resource_type && cat[row.resource_type]) {
-               cat[row.resource_type].push(row as DBResource);
-            }
-          });
-        }
-        
-        setCategorized(cat);
-      } catch (err) {
-        console.error('Error fetching papers:', err);
-        setError(err instanceof Error ? err.message : "Failed to load papers from database");
-      } finally {
-        setIsLoading(false);
-      }
+  const fetchPapers = async (pageNum: number, isInitial: boolean) => {
+    if (!subjectId) {
+      setIsLoading(false);
+      return;
     }
     
-    fetchPapers();
+    if (isInitial) {
+      setIsLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
+    setError(null);
+    
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('elex_papers')
+        .select('*')
+        .eq('is_approved', true)
+        .eq('subject_code', subjectId)
+        .order('exam_year', { ascending: false })
+        .range(pageNum * PAGE_SIZE, (pageNum + 1) * PAGE_SIZE - 1);
+
+      if (fetchError) throw fetchError;
+      
+      const newPapers = (data || []) as DBResource[];
+      if (isInitial) {
+        setPapersList(newPapers);
+      } else {
+        setPapersList((prev) => [...prev, ...newPapers]);
+      }
+      
+      if (newPapers.length < PAGE_SIZE) {
+        setHasMore(false);
+      } else {
+        setHasMore(true);
+      }
+    } catch (err) {
+      console.error('Error fetching papers:', err);
+      setError(err instanceof Error ? err.message : "Failed to load papers from database");
+    } finally {
+      setIsLoading(false);
+      setLoadingMore(false);
+    }
+  };
+
+  useEffect(() => {
+    setPage(0);
+    setHasMore(true);
+    setPapersList([]);
+    fetchPapers(0, true);
   }, [subjectId]);
 
   // DEBUG LOG 2 & 3: Papers and Loading State
@@ -162,14 +185,17 @@ const SubjectPageContent = () => {
   // Safe mapping helper for PaperList
   const mapPapers = (arr: DBResource[], label: string) => {
     if (!Array.isArray(arr)) return [];
-    return arr.map((p) => ({
-      id: String(p?.id || Math.random()),
-      subjectId: p?.subject_code || subjectId,
-      type: label,
-      year: Number(p?.exam_year) || new Date().getFullYear(),
-      downloadUrl: p?.file_url || "#",
-      contributor: p?.contributor_name || "Anonymous",
-    }));
+    return arr.map((p) => {
+      const yearVal = Number(p?.exam_year);
+      return {
+        id: String(p?.id || Math.random()),
+        subjectId: p?.subject_code || subjectId,
+        type: label,
+        year: isNaN(yearVal) ? new Date().getFullYear() : yearVal,
+        downloadUrl: p?.file_url || "#",
+        contributor: p?.contributor_name || "Anonymous",
+      };
+    });
   };
 
   // Re-create subjectPapers array safely for the component
@@ -259,7 +285,31 @@ const SubjectPageContent = () => {
             ) : subjectPapers.length === 0 ? (
               <p className="text-sm text-muted-foreground">No papers uploaded yet for this subject.</p>
             ) : (
-              <PaperList papers={subjectPapers} />
+              <>
+                <PaperList papers={subjectPapers} />
+                {hasMore && (
+                  <div className="flex justify-center mt-6">
+                    <button
+                      onClick={() => {
+                        const nextPage = page + 1;
+                        setPage(nextPage);
+                        fetchPapers(nextPage, false);
+                      }}
+                      disabled={loadingMore}
+                      className="px-6 py-2.5 rounded-lg border border-border bg-secondary/50 hover:bg-secondary text-foreground text-xs font-semibold hover:opacity-90 disabled:opacity-50 transition-all flex items-center gap-2 cursor-pointer"
+                    >
+                      {loadingMore ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Loading more...</span>
+                        </>
+                      ) : (
+                        <span>Load More Papers</span>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </motion.div>
         </div>

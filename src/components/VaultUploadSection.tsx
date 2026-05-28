@@ -10,113 +10,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Loader2, Upload, CheckCircle } from 'lucide-react';
+import { Loader2, Upload, CheckCircle, X } from 'lucide-react';
 import { academicStructure, CourseKey, SemesterKey } from '@/data/academicStructure';
 import { supabase } from '@/lib/supabaseClient';
-import { jsPDF } from 'jspdf';
-import imageCompression from 'browser-image-compression';
-
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
-
-const readFileAsDataURL = (file: Blob): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-};
-
-const getImageDimensions = (dataUrl: string): Promise<{ width: number; height: number }> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    img.onerror = () => reject(new Error('Failed to load image to calculate dimensions'));
-    img.src = dataUrl;
-  });
-};
-
-const compressImage = async (imageFile: File): Promise<File> => {
-  const options = {
-    maxSizeMB: 1,
-    maxWidthOrHeight: 1920,
-    useWebWorker: true,
-  };
-  try {
-    return await imageCompression(imageFile, options);
-  } catch (error) {
-    console.error('Image compression failed:', error);
-    throw new Error('Failed to compress image safely. The image file might be corrupted.');
-  }
-};
-
-const convertImageToPdf = (imageFile: File): Promise<Blob> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const imgDataUrl = e.target?.result as string;
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const pdf = new jsPDF({
-            orientation: 'p',
-            unit: 'mm',
-            format: 'a4',
-          });
-
-          // A4 dimensions in mm: 210 x 297
-          const a4Width = 210;
-          const a4Height = 297;
-
-          // Get image dimensions
-          const imgWidth = img.naturalWidth || img.width;
-          const imgHeight = img.naturalHeight || img.height;
-
-          // Calculate dimensions maintaining aspect ratio
-          const aspectRatio = imgWidth / imgHeight;
-          const a4AspectRatio = a4Width / a4Height;
-
-          let width = a4Width;
-          let height = a4Height;
-          let x = 0;
-          let y = 0;
-
-          if (aspectRatio > a4AspectRatio) {
-            // Image is wider than A4 ratio
-            width = a4Width;
-            height = a4Width / aspectRatio;
-            y = (a4Height - height) / 2; // Center vertically
-          } else {
-            // Image is taller than A4 ratio
-            height = a4Height;
-            width = a4Height * aspectRatio;
-            x = (a4Width - width) / 2; // Center horizontally
-          }
-
-          // Determine format from mime type
-          let format = 'JPEG';
-          if (imageFile.type === 'image/png') {
-            format = 'PNG';
-          }
-
-          pdf.addImage(imgDataUrl, format, x, y, width, height, undefined, 'FAST');
-          const pdfBlob = pdf.output('blob');
-          resolve(pdfBlob);
-        } catch (err) {
-          reject(new Error('PDF generation failed: ' + (err instanceof Error ? err.message : String(err))));
-        }
-      };
-      img.onerror = () => {
-        reject(new Error('Failed to load image. The file might be corrupted or in an unsupported format.'));
-      };
-      img.src = imgDataUrl;
-    };
-    reader.onerror = () => {
-      reject(new Error('Failed to read image file.'));
-    };
-    reader.readAsDataURL(imageFile);
-  });
-};
+const MAX_TOTAL_SIZE = 10 * 1024 * 1024; // 10 MB limit for multiple files
+const MAX_FILE_COUNT = 10;
 
 interface UploadFormData {
   course: string;
@@ -146,7 +44,8 @@ export const VaultUploadSection = () => {
     { value: 'assignment', label: 'Assignment' },
   ];
 
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [conversionProgress, setConversionProgress] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [processingStep, setProcessingStep] = useState<string>('');
@@ -202,37 +101,45 @@ export const VaultUploadSection = () => {
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
+    if (e.target.files && e.target.files.length > 0) {
+      const selectedFiles = Array.from(e.target.files);
       const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
-      if (!allowedTypes.includes(selectedFile.type)) {
+      
+      const validFiles = selectedFiles.filter(f => allowedTypes.includes(f.type));
+      if (validFiles.length !== selectedFiles.length) {
         toast.error('Only PDF, JPG, JPEG, and PNG files are allowed.');
+      }
+      
+      const totalSize = [...files, ...validFiles].reduce((acc, f) => acc + f.size, 0);
+      if (totalSize > MAX_TOTAL_SIZE) {
+        toast.error('Total file size exceeds 10 MB limit.');
         return;
       }
-      if (selectedFile.size > MAX_FILE_SIZE) {
-        toast.error('File size must be less than 5 MB.');
+      if (files.length + validFiles.length > MAX_FILE_COUNT) {
+        toast.error('You can only upload a maximum of 10 images at once.');
         return;
       }
-      setFile(selectedFile);
+
+      const hasPdf = files.some(f => f.type === 'application/pdf') || validFiles.some(f => f.type === 'application/pdf');
+      if (hasPdf && (files.length + validFiles.length > 1)) {
+        toast.error('Cannot combine multiple files if a PDF is included. Upload images only to merge them.');
+        return;
+      }
+
+      setFiles(prev => [...prev, ...validFiles]);
+      e.target.value = '';
     }
+  };
+
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!file) {
-      toast.error('Please select a PDF or image file');
-      return;
-    }
-
-    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
-    if (!allowedTypes.includes(file.type)) {
-      toast.error('Only PDF, JPG, JPEG, and PNG files are allowed.');
-      return;
-    }
-
-    if (file.size > MAX_FILE_SIZE) {
-      toast.error('File size must be less than 5 MB.');
+    if (files.length === 0) {
+      toast.error('Please select a PDF or image files');
       return;
     }
 
@@ -280,17 +187,77 @@ export const VaultUploadSection = () => {
         return; // BLOCK upload
       }
 
-      // Process file based on type
-      let fileToUpload = file;
-      if (file.type !== 'application/pdf') {
-        setProcessingStep('Compressing image...');
-        const compressed = await compressImage(file);
-
-        setProcessingStep('Converting to PDF...');
-        const pdfBlob = await convertImageToPdf(compressed);
-
-        const baseName = file.name.split('.').slice(0, -1).join('.') || 'document';
-        fileToUpload = new File([pdfBlob], `${baseName}.pdf`, { type: 'application/pdf' });
+      // Process files based on type
+      let fileToUpload: File;
+      if (files.length === 1 && files[0].type === 'application/pdf') {
+        fileToUpload = files[0];
+      } else {
+        setProcessingStep('Loading PDF generator...');
+        setConversionProgress(0);
+        // Dynamically import heavy libraries for code splitting
+        const { jsPDF } = await import('jspdf');
+        const imageCompression = (await import('browser-image-compression')).default;
+        
+        const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+        const a4Width = 210;
+        const a4Height = 297;
+        
+        for (let i = 0; i < files.length; i++) {
+          setProcessingStep(`Compressing image ${i + 1} of ${files.length}...`);
+          setConversionProgress(Math.round(((i) / files.length) * 100));
+          
+          const options = { maxSizeMB: 1, maxWidthOrHeight: 1920, useWebWorker: true };
+          let compressedFile = files[i];
+          try {
+            compressedFile = await imageCompression(files[i], options);
+          } catch (err) {
+            console.error('Compression error:', err);
+          }
+          
+          setProcessingStep(`Adding page ${i + 1} to PDF...`);
+          
+          await new Promise<void>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const imgDataUrl = e.target?.result as string;
+              const img = new Image();
+              img.onload = () => {
+                const imgWidth = img.naturalWidth || img.width;
+                const imgHeight = img.naturalHeight || img.height;
+                const aspectRatio = imgWidth / imgHeight;
+                const a4AspectRatio = a4Width / a4Height;
+                let width = a4Width, height = a4Height, x = 0, y = 0;
+                
+                if (aspectRatio > a4AspectRatio) {
+                  width = a4Width;
+                  height = a4Width / aspectRatio;
+                  y = (a4Height - height) / 2;
+                } else {
+                  height = a4Height;
+                  width = a4Height * aspectRatio;
+                  x = (a4Width - width) / 2;
+                }
+                
+                let format = 'JPEG';
+                if (compressedFile.type === 'image/png') format = 'PNG';
+                
+                if (i > 0) pdf.addPage();
+                pdf.addImage(imgDataUrl, format, x, y, width, height, undefined, 'FAST');
+                resolve();
+              };
+              img.onerror = () => reject(new Error('Failed to load image for PDF'));
+              img.src = imgDataUrl;
+            };
+            reader.onerror = () => reject(new Error('Failed to read image file'));
+            reader.readAsDataURL(compressedFile);
+          });
+        }
+        
+        setProcessingStep('Finalizing PDF...');
+        setConversionProgress(100);
+        const pdfBlob = pdf.output('blob');
+        const baseName = files[0].name.split('.').slice(0, -1).join('.') || 'document';
+        fileToUpload = new File([pdfBlob], `${baseName}_merged.pdf`, { type: 'application/pdf' });
       }
 
       setProcessingStep('Uploading PDF to vault...');
@@ -329,6 +296,7 @@ export const VaultUploadSection = () => {
         file_url: publicUrl,
         is_approved: false,
         resource_type: formData.resource_type,
+        storage_path: fileName,
       };
 
       console.log('UPLOAD PAYLOAD', payload);
@@ -340,7 +308,17 @@ export const VaultUploadSection = () => {
         .insert([payload]);
 
       console.log('INSERT RESPONSE', { insertData, insertError });
-      if (insertError) throw insertError;
+      if (insertError) {
+        // Rollback storage upload to prevent orphaned file
+        await supabase.storage
+          .from('papers_pdf')
+          .remove([fileName]);
+
+        if (insertError.code === '23505') {
+          throw new Error('This paper has already been submitted or approved in the vault. Please verify your resource details.');
+        }
+        throw insertError;
+      }
 
       setUploadSuccess(true);
       toast.success('Paper uploaded successfully — pending admin approval.');
@@ -354,7 +332,8 @@ export const VaultUploadSection = () => {
         contributor_name: '',
         resource_type: '',
       });
-      setFile(null);
+      setFiles([]);
+      setConversionProgress(0);
 
       setTimeout(() => setUploadSuccess(false), 3000);
     } catch (err) {
@@ -533,32 +512,68 @@ export const VaultUploadSection = () => {
               {/* PDF or Image Upload */}
               <div>
                 <Label htmlFor="pdf" className="text-zinc-200 font-medium">
-                  Upload PDF or Image
+                  Upload PDF or Images
                 </Label>
-                <div className="mt-2 relative">
-                  <input
-                    id="pdf"
-                    type="file"
-                    accept=".pdf,image/jpeg,image/jpg,image/png"
-                    onChange={handleFileChange}
-                    className="hidden"
-                    disabled={isLoading}
-                  />
-                  <label
-                    htmlFor="pdf"
-                    className="flex flex-col items-center justify-center w-full p-6 border-2 border-dashed border-slate-600 rounded-xl bg-slate-800/30 cursor-pointer hover:bg-slate-800/50 transition-colors"
-                  >
-                    <Upload className="w-8 h-8 text-blue-400 mb-2" />
-                    <span className="text-zinc-300 font-medium text-center">
-                      {file ? file.name : 'Click to upload PDF or Image'}
-                    </span>
-                    <span className="text-zinc-500 text-xs mt-1 text-center font-normal">
-                      Images are automatically converted into PDF format before moderation.
-                    </span>
-                    <span className="text-zinc-500 text-xs mt-1">
-                      Max 5MB
-                    </span>
-                  </label>
+                <div className="mt-2 space-y-4">
+                  <div className="relative">
+                    <input
+                      id="pdf"
+                      type="file"
+                      multiple
+                      accept=".pdf,image/jpeg,image/jpg,image/png"
+                      onChange={handleFileChange}
+                      className="hidden"
+                      disabled={isLoading}
+                    />
+                    <label
+                      htmlFor="pdf"
+                      className="flex flex-col items-center justify-center w-full p-6 border-2 border-dashed border-slate-600 rounded-xl bg-slate-800/30 cursor-pointer hover:bg-slate-800/50 transition-colors"
+                    >
+                      <Upload className="w-8 h-8 text-blue-400 mb-2" />
+                      <span className="text-zinc-300 font-medium text-center">
+                        Click to upload PDF or Images
+                      </span>
+                      <span className="text-zinc-500 text-xs mt-1 text-center font-normal">
+                        Multiple images will be merged into a single PDF.
+                      </span>
+                      <span className="text-zinc-500 text-xs mt-1">
+                        Max 10MB total, up to 10 files
+                      </span>
+                    </label>
+                  </div>
+
+                  {files.length > 0 && (
+                    <div className="bg-slate-800/30 border border-slate-700 p-3 rounded-xl">
+                      <div className="flex items-center justify-between mb-3 border-b border-slate-700/50 pb-2">
+                        <span className="text-xs font-semibold text-zinc-300">Selected Files ({files.length})</span>
+                        {conversionProgress > 0 && conversionProgress < 100 && (
+                          <span className="text-xs font-bold text-blue-400">{conversionProgress}% Converted</span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {files.map((f, idx) => (
+                          <div key={idx} className="relative group rounded-lg overflow-hidden border border-slate-700 bg-slate-800/50 flex flex-col items-center p-2">
+                            {f.type.startsWith('image/') ? (
+                              <img src={URL.createObjectURL(f)} alt="preview" className="h-16 object-contain mb-2" />
+                            ) : (
+                              <div className="h-16 flex items-center justify-center mb-2">
+                                <span className="text-xs font-bold text-red-400">PDF</span>
+                              </div>
+                            )}
+                            <span className="text-[10px] text-zinc-400 truncate w-full text-center">{f.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeFile(idx)}
+                              disabled={isLoading}
+                              className="absolute top-1 right-1 bg-red-500/80 hover:bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
